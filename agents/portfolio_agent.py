@@ -2,7 +2,7 @@
 
 import os
 from typing import Dict, Any, List
-from langchain_anthropic import ChatAnthropic
+from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 from langgraph.graph import StateGraph, END
 from langgraph.prebuilt import ToolNode
@@ -15,10 +15,10 @@ class PortfolioAgent:
     """LangGraph-based portfolio management agent."""
 
     def __init__(self, api_key: str = None):
-        """Initialize the agent with Claude."""
-        self.llm = ChatAnthropic(
-            model="claude-sonnet-4-20250514",
-            api_key=api_key or os.getenv("ANTHROPIC_API_KEY"),
+        """Initialize the agent with OpenAI."""
+        self.llm = ChatOpenAI(
+            model="gpt-4o-mini",  # Cheap and fast
+            api_key=api_key or os.getenv("OPENAI_API_KEY"),
             temperature=0.7
         )
 
