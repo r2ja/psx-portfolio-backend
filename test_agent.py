@@ -80,9 +80,9 @@ def test_email_service():
 def main():
     """Run all tests."""
     print("""
-    ╔═══════════════════════════════════════╗
-    ║  PSX Portfolio Agent Test Suite       ║
-    ╚═══════════════════════════════════════╝
+    ==========================================
+      PSX Portfolio Agent Test Suite
+    ==========================================
     """)
 
     try:
@@ -92,11 +92,11 @@ def main():
         test_email_service()
 
         print("\n" + "="*60)
-        print("✅ All tests completed!")
+        print("[SUCCESS] All tests completed!")
         print("="*60 + "\n")
 
     except Exception as e:
-        print(f"\n❌ Test failed: {e}\n")
+        print(f"\n[FAILED] Test failed: {e}\n")
         import traceback
         traceback.print_exc()
 
