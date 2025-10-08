@@ -17,10 +17,22 @@ class QueryRequest(BaseModel):
     portfolio: Optional[List[PortfolioItem]] = Field(default=None, description="Optional portfolio context")
 
 
+class StockData(BaseModel):
+    """Stock data for display."""
+    symbol: str
+    price: float
+    change: float
+    changePercent: float
+    rsi: Optional[float] = None
+    recommendation: Optional[str] = None
+    volume: Optional[int] = None
+
+
 class QueryResponse(BaseModel):
     """Response from agent query."""
     response: str = Field(..., description="AI-generated response")
     timestamp: str
+    stocks: Optional[List[StockData]] = Field(default=None, description="Extracted stock data")
 
 
 class PortfolioAnalysisRequest(BaseModel):

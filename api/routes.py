@@ -35,12 +35,13 @@ async def query_agent(request: QueryRequest):
         if request.portfolio:
             portfolio = [item.dict() for item in request.portfolio]
 
-        # Get response from agent
-        response = agent.query(request.query, portfolio)
+        # Get response from agent (now returns dict with response and stocks)
+        result = agent.query(request.query, portfolio)
 
         return QueryResponse(
-            response=response,
-            timestamp=datetime.now().isoformat()
+            response=result.get("response", "No response"),
+            timestamp=datetime.now().isoformat(),
+            stocks=result.get("stocks", [])
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

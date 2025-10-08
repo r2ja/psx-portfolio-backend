@@ -72,6 +72,14 @@ Your capabilities:
 - Provide investment insights
 - Calculate portfolio performance
 
+IMPORTANT: When showing stock data, DO NOT list stock details in your text response (like price, change, volume, etc.).
+The stock cards will automatically display this information visually.
+Instead, provide brief context, insights, or recommendations about the stocks shown.
+
+Example:
+Good: "Here are today's top PSX gainers showing strong momentum:"
+Bad: "Top gainers: SHEZ at 45.2 (+5.3%), OGDC at 120.5 (+3.2%)..."
+
 Be concise and actionable in your responses. Always use tools to get real-time data."""
 
         full_messages = [SystemMessage(content=system_prompt)] + messages
@@ -104,7 +112,7 @@ Be concise and actionable in your responses. Always use tools to get real-time d
             )
         return "\n".join(lines)
 
-    def query(self, user_query: str, portfolio: List[Dict[str, Any]] = None) -> str:
+    def query(self, user_query: str, portfolio: List[Dict[str, Any]] = None) -> Dict[str, Any]:
         """
         Process a user query with optional portfolio context.
 
@@ -113,7 +121,7 @@ Be concise and actionable in your responses. Always use tools to get real-time d
             portfolio: Optional list of portfolio items
 
         Returns:
-            AI response as string
+            Dict with response text and extracted stock data
         """
         initial_state = {
             "messages": [HumanMessage(content=user_query)],
@@ -126,14 +134,113 @@ Be concise and actionable in your responses. Always use tools to get real-time d
         # Run the graph
         result = self.graph.invoke(initial_state)
 
-        # Extract final response
+        # Extract final response and tool calls
         messages = result.get("messages", [])
-        if messages:
-            last_message = messages[-1]
-            if hasattr(last_message, 'content'):
-                return last_message.content
+        response_text = "I couldn't process that request."
+        stocks = []
 
-        return "I couldn't process that request."
+        if messages:
+            # Extract the final AI message
+            for msg in reversed(messages):
+                if hasattr(msg, 'content') and isinstance(msg.content, str) and msg.content.strip():
+                    response_text = msg.content
+                    break
+
+            # Extract stock data from tool calls
+            stocks = self._extract_stocks_from_messages(messages)
+
+        return {
+            "response": response_text,
+            "stocks": stocks
+        }
+
+    def _extract_stocks_from_messages(self, messages: List) -> List[Dict[str, Any]]:
+        """Extract stock data from tool call results in messages."""
+        stocks = []
+        seen_symbols = set()
+
+        for msg in messages:
+            # Check for tool messages
+            if hasattr(msg, 'content') and isinstance(msg.content, str):
+                try:
+                    import json
+                    # Try to parse if it's JSON
+                    if msg.content.strip().startswith('[') or msg.content.strip().startswith('{'):
+                        data = json.loads(msg.content)
+
+                        # Handle list of stocks
+                        if isinstance(data, list):
+                            for item in data:
+                                if isinstance(item, dict) and 'symbol' in item:
+                                    stock = self._format_stock_data(item)
+                                    if stock and stock['symbol'] not in seen_symbols:
+                                        stocks.append(stock)
+                                        seen_symbols.add(stock['symbol'])
+
+                        # Handle single stock
+                        elif isinstance(data, dict) and 'symbol' in data:
+                            stock = self._format_stock_data(data)
+                            if stock and stock['symbol'] not in seen_symbols:
+                                stocks.append(stock)
+                                seen_symbols.add(stock['symbol'])
+                except:
+                    pass
+
+        return stocks[:10]  # Limit to 10 stocks
+
+    def _format_stock_data(self, raw_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Format stock data to match frontend expectations."""
+        try:
+            symbol = raw_data.get('symbol', '').replace('PSX:', '')
+
+            # Handle different data formats
+            if 'price_data' in raw_data:
+                # Detailed stock analysis format
+                price_data = raw_data['price_data']
+                tech = raw_data.get('technical_indicators', {})
+                return {
+                    'symbol': symbol,
+                    'price': price_data.get('current_price', 0),
+                    'change': price_data.get('current_price', 0) - price_data.get('open', 0),
+                    'changePercent': price_data.get('change_percent', 0),
+                    'rsi': tech.get('rsi'),
+                    'volume': price_data.get('volume'),
+                    'recommendation': self._get_recommendation(tech.get('rsi'), price_data.get('change_percent', 0))
+                }
+            else:
+                # Simple format from gainers/losers
+                price = raw_data.get('price', raw_data.get('close', 0))
+                change_pct = raw_data.get('change_percent', raw_data.get('change', 0))
+                open_price = raw_data.get('open', price)
+                change = price - open_price
+
+                return {
+                    'symbol': symbol,
+                    'price': price,
+                    'change': change,
+                    'changePercent': change_pct,
+                    'rsi': raw_data.get('rsi'),
+                    'volume': raw_data.get('volume'),
+                    'recommendation': self._get_recommendation(raw_data.get('rsi'), change_pct)
+                }
+        except Exception as e:
+            print(f"Error formatting stock data: {e}")
+            return None
+
+    def _get_recommendation(self, rsi: float = None, change_pct: float = 0) -> str:
+        """Determine buy/sell/hold recommendation."""
+        if rsi is not None:
+            if rsi < 30:
+                return "BUY"
+            elif rsi > 70:
+                return "SELL"
+
+        if change_pct > 5:
+            return "SELL"
+        elif change_pct < -5:
+            return "BUY"
+
+        return "HOLD"
 
     def analyze_portfolio(self, portfolio: List[Dict[str, Any]]) -> Dict[str, Any]:
         """
