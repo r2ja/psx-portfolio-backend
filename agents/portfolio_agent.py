@@ -122,13 +122,29 @@ RESPONSE STYLE:
 - Be decisive: "Buy SHEZ" not "You might consider SHEZ"
 - Keep responses SHORT and actionable
 
+CRITICAL - STOCK RECOMMENDATIONS:
+For EACH stock you analyze, you MUST provide:
+1. Recommendation: BUY, SELL, or HOLD
+2. Simple reason (one short sentence)
+
+Format your analysis like this:
+"[STOCK:SHEZ|BUY|Strong upward momentum with high volume]"
+"[STOCK:OGDC|HOLD|Stable but no clear direction]"
+"[STOCK:PSO|SELL|Overpriced after recent rally]"
+
+This format will be parsed to create stock cards. Put these tags AFTER your main response.
+
 When showing stock data:
 - DO NOT list stock details (price, change, volume) - cards show this automatically
-- DO provide brief reasoning: "Strong growth momentum" or "Good value opportunity"
+- Your text response should explain the overall market view
+- Stock tags will generate the visual cards
 
-Example:
-Good: "Here are my top 3 picks for tomorrow - all showing strong upward trends:"
-Bad: "Top gainers: SHEZ at 45.2 (+5.3%), RSI 65, MACD bullish..."
+Example good response:
+"Here are my top 3 picks for tomorrow based on strong trends and good value:
+
+[STOCK:SHEZ|BUY|Strong buying momentum]
+[STOCK:OGDC|BUY|Undervalued with solid fundamentals]
+[STOCK:PSO|BUY|Breaking resistance levels]"
 
 Always use tools to get latest data before responding."""
 
@@ -196,8 +212,17 @@ Always use tools to get latest data before responding."""
                     response_text = msg.content
                     break
 
-            # Extract stock data from tool calls
+            # Extract stock data from tool calls AND LLM recommendations
             stocks = self._extract_stocks_from_messages(messages)
+
+            # Parse LLM-generated recommendations from response text
+            llm_stocks = self._parse_llm_recommendations(response_text)
+
+            # Merge: LLM recommendations override tool data
+            stocks = self._merge_stock_data(stocks, llm_stocks)
+
+            # Clean response text (remove stock tags)
+            response_text = self._clean_response_text(response_text)
 
         return {
             "response": response_text,
@@ -237,6 +262,62 @@ Always use tools to get latest data before responding."""
                     pass
 
         return stocks[:10]  # Limit to 10 stocks
+
+    def _parse_llm_recommendations(self, text: str) -> List[Dict[str, Any]]:
+        """Parse LLM-generated stock recommendations from response text."""
+        import re
+
+        # Pattern: [STOCK:SYMBOL|RECOMMENDATION|REASON]
+        pattern = r'\[STOCK:([A-Z]+)\|([A-Z]+)\|([^\]]+)\]'
+        matches = re.findall(pattern, text)
+
+        llm_stocks = []
+        for symbol, recommendation, reason in matches:
+            llm_stocks.append({
+                'symbol': symbol,
+                'recommendation': recommendation.upper(),
+                'reason': reason.strip()
+            })
+
+        return llm_stocks
+
+    def _clean_response_text(self, text: str) -> str:
+        """Remove stock tags from response text."""
+        import re
+        # Remove [STOCK:...] tags
+        cleaned = re.sub(r'\[STOCK:[^\]]+\]', '', text)
+        # Clean up extra whitespace
+        cleaned = re.sub(r'\n\s*\n', '\n\n', cleaned).strip()
+        return cleaned
+
+    def _merge_stock_data(self, tool_stocks: List[Dict[str, Any]], llm_stocks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Merge tool data with LLM recommendations."""
+        # Create lookup for LLM recommendations
+        llm_lookup = {stock['symbol']: stock for stock in llm_stocks}
+
+        # Merge
+        merged = []
+        for tool_stock in tool_stocks:
+            symbol = tool_stock['symbol']
+            if symbol in llm_lookup:
+                # Override recommendation and reason with LLM's analysis
+                tool_stock['recommendation'] = llm_lookup[symbol]['recommendation']
+                tool_stock['reason'] = llm_lookup[symbol]['reason']
+                llm_lookup.pop(symbol)  # Remove from lookup
+            merged.append(tool_stock)
+
+        # Add any LLM-recommended stocks not in tool data (with placeholder data)
+        for symbol, llm_stock in llm_lookup.items():
+            merged.append({
+                'symbol': symbol,
+                'price': 0,  # Will need to be fetched
+                'change': 0,
+                'changePercent': 0,
+                'recommendation': llm_stock['recommendation'],
+                'reason': llm_stock['reason']
+            })
+
+        return merged[:10]
 
     def _format_stock_data(self, raw_data: Dict[str, Any]) -> Dict[str, Any]:
         """Format stock data to match frontend expectations."""
