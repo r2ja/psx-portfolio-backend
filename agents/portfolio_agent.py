@@ -59,8 +59,37 @@ class PortfolioAgent:
         messages = state.get("messages", [])
         portfolio = state.get("portfolio", [])
 
+        # Get current time in Pakistan timezone
+        from datetime import datetime
+        import pytz
+
+        pk_tz = pytz.timezone('Asia/Karachi')
+        now = datetime.now(pk_tz)
+        current_time = now.strftime("%A, %B %d, %Y at %I:%M %p PKT")
+
+        # Determine market status (PSX trading hours: 9:15 AM - 3:30 PM, Mon-Fri)
+        is_weekend = now.weekday() >= 5  # Saturday = 5, Sunday = 6
+        market_open_time = now.replace(hour=9, minute=15, second=0, microsecond=0)
+        market_close_time = now.replace(hour=15, minute=30, second=0, microsecond=0)
+        is_market_hours = market_open_time <= now <= market_close_time
+
+        if is_weekend:
+            market_status = "CLOSED (Weekend)"
+        elif is_market_hours:
+            market_status = "OPEN"
+        else:
+            market_status = "CLOSED"
+
         # Add system prompt
         system_prompt = f"""You are a PSX (Pakistan Stock Exchange) portfolio analysis assistant.
+
+CURRENT TIME: {current_time}
+MARKET STATUS: {market_status}
+
+IMPORTANT: The PSX market operates Monday-Friday, 9:15 AM - 3:30 PM PKT.
+- If market is CLOSED, remind users that data shown is from the last trading session
+- If outside trading hours, mention that live trading is not currently active
+- Always consider the current time when giving advice about immediate actions
 
 Current portfolio:
 {self._format_portfolio(portfolio)}
