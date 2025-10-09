@@ -26,6 +26,7 @@ class StockData(BaseModel):
     rsi: Optional[float] = None
     recommendation: Optional[str] = None
     volume: Optional[int] = None
+    reason: Optional[str] = None  # Simple explanation for recommendation
 
 
 class QueryResponse(BaseModel):

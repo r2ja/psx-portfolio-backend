@@ -81,15 +81,30 @@ class PortfolioAgent:
             market_status = "CLOSED"
 
         # Add system prompt
-        system_prompt = f"""You are a PSX (Pakistan Stock Exchange) portfolio analysis assistant.
+        system_prompt = f"""You are a PSX (Pakistan Stock Exchange) portfolio analysis assistant for REGULAR INVESTORS (not traders).
 
 CURRENT TIME: {current_time}
 MARKET STATUS: {market_status}
 
-IMPORTANT: The PSX market operates Monday-Friday, 9:15 AM - 3:30 PM PKT.
-- If market is CLOSED, remind users that data shown is from the last trading session
-- If outside trading hours, mention that live trading is not currently active
-- Always consider the current time when giving advice about immediate actions
+CRITICAL INSTRUCTIONS:
+- Users are laypeople who want simple, actionable advice
+- ALWAYS provide stock recommendations even when market is closed
+- Use latest available data to give clear buy/sell recommendations
+- If market is closed, base recommendations on last trading session data - that's perfectly fine!
+- NEVER say "I can't provide recommendations because market is closed" - that's bad UX
+- Be decisive and confident in your recommendations
+
+When users ask "what should I buy?":
+1. Analyze current data using your tools
+2. Give 1-3 specific stock recommendations
+3. Explain WHY in simple terms (no jargon like "RSI" or "MACD")
+4. Provide clear entry price targets
+
+Example good response:
+"Based on latest data, I recommend buying SHEZ tomorrow. It's showing strong upward momentum and is currently undervalued at Rs 45. Consider buying if it opens below Rs 48."
+
+Example bad response:
+"Market is closed, I can't help" ❌
 
 Current portfolio:
 {self._format_portfolio(portfolio)}
@@ -101,15 +116,21 @@ Your capabilities:
 - Provide investment insights
 - Calculate portfolio performance
 
-IMPORTANT: When showing stock data, DO NOT list stock details in your text response (like price, change, volume, etc.).
-The stock cards will automatically display this information visually.
-Instead, provide brief context, insights, or recommendations about the stocks shown.
+RESPONSE STYLE:
+- Use simple language - NO technical jargon (avoid: RSI, MACD, Bollinger Bands, etc.)
+- Instead say: "oversold" = "cheap right now", "overbought" = "expensive right now"
+- Be decisive: "Buy SHEZ" not "You might consider SHEZ"
+- Keep responses SHORT and actionable
+
+When showing stock data:
+- DO NOT list stock details (price, change, volume) - cards show this automatically
+- DO provide brief reasoning: "Strong growth momentum" or "Good value opportunity"
 
 Example:
-Good: "Here are today's top PSX gainers showing strong momentum:"
-Bad: "Top gainers: SHEZ at 45.2 (+5.3%), OGDC at 120.5 (+3.2%)..."
+Good: "Here are my top 3 picks for tomorrow - all showing strong upward trends:"
+Bad: "Top gainers: SHEZ at 45.2 (+5.3%), RSI 65, MACD bullish..."
 
-Be concise and actionable in your responses. Always use tools to get real-time data."""
+Always use tools to get latest data before responding."""
 
         full_messages = [SystemMessage(content=system_prompt)] + messages
 
@@ -227,14 +248,20 @@ Be concise and actionable in your responses. Always use tools to get real-time d
                 # Detailed stock analysis format
                 price_data = raw_data['price_data']
                 tech = raw_data.get('technical_indicators', {})
+                rsi = tech.get('rsi')
+                change_pct = price_data.get('change_percent', 0)
+
+                recommendation, reason = self._get_recommendation_with_reason(rsi, change_pct)
+
                 return {
                     'symbol': symbol,
                     'price': price_data.get('current_price', 0),
                     'change': price_data.get('current_price', 0) - price_data.get('open', 0),
-                    'changePercent': price_data.get('change_percent', 0),
-                    'rsi': tech.get('rsi'),
+                    'changePercent': change_pct,
+                    'rsi': rsi,
                     'volume': price_data.get('volume'),
-                    'recommendation': self._get_recommendation(tech.get('rsi'), price_data.get('change_percent', 0))
+                    'recommendation': recommendation,
+                    'reason': reason
                 }
             else:
                 # Simple format from gainers/losers
@@ -242,34 +269,44 @@ Be concise and actionable in your responses. Always use tools to get real-time d
                 change_pct = raw_data.get('change_percent', raw_data.get('change', 0))
                 open_price = raw_data.get('open', price)
                 change = price - open_price
+                rsi = raw_data.get('rsi')
+
+                recommendation, reason = self._get_recommendation_with_reason(rsi, change_pct)
 
                 return {
                     'symbol': symbol,
                     'price': price,
                     'change': change,
                     'changePercent': change_pct,
-                    'rsi': raw_data.get('rsi'),
+                    'rsi': rsi,
                     'volume': raw_data.get('volume'),
-                    'recommendation': self._get_recommendation(raw_data.get('rsi'), change_pct)
+                    'recommendation': recommendation,
+                    'reason': reason
                 }
         except Exception as e:
             print(f"Error formatting stock data: {e}")
             return None
 
-    def _get_recommendation(self, rsi: float = None, change_pct: float = 0) -> str:
-        """Determine buy/sell/hold recommendation."""
+    def _get_recommendation_with_reason(self, rsi: float = None, change_pct: float = 0) -> tuple[str, str]:
+        """Determine buy/sell/hold recommendation with simple reasoning."""
+        # RSI-based signals (stronger signals)
         if rsi is not None:
             if rsi < 30:
-                return "BUY"
+                return "BUY", "Cheap right now, good value"
             elif rsi > 70:
-                return "SELL"
+                return "SELL", "Expensive, take profits"
 
+        # Price change-based signals
         if change_pct > 5:
-            return "SELL"
+            return "SELL", "Strong gains, consider selling"
         elif change_pct < -5:
-            return "BUY"
+            return "BUY", "Big drop, buying opportunity"
+        elif change_pct > 2:
+            return "HOLD", "Positive momentum"
+        elif change_pct < -2:
+            return "HOLD", "Slight dip, monitor closely"
 
-        return "HOLD"
+        return "HOLD", "Stable, wait and see"
 
     def analyze_portfolio(self, portfolio: List[Dict[str, Any]]) -> Dict[str, Any]:
         """
