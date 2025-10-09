@@ -166,6 +166,28 @@ async def get_stock_info(symbol: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.post("/stocks/current-prices")
+async def get_current_prices(symbols: List[str]):
+    """
+    Get current prices for multiple stocks.
+
+    Request body: ["SHEZ", "OGDC", "PSO"]
+    Returns: {"SHEZ": 45.50, "OGDC": 120.30, ...}
+    """
+    try:
+        from tools.tradingview_tools import get_stock_analysis
+        prices = {}
+
+        for symbol in symbols:
+            result = get_stock_analysis.invoke({"symbol": symbol})
+            if "error" not in result:
+                prices[symbol] = result["price_data"]["current_price"]
+
+        return prices
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/health")
 async def health_check():
     """Health check endpoint."""

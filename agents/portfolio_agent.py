@@ -118,33 +118,15 @@ Your capabilities:
 
 RESPONSE STYLE:
 - Use simple language - NO technical jargon (avoid: RSI, MACD, Bollinger Bands, etc.)
-- Instead say: "oversold" = "cheap right now", "overbought" = "expensive right now"
-- Be decisive: "Buy SHEZ" not "You might consider SHEZ"
-- Keep responses SHORT and actionable
-
-CRITICAL - STOCK RECOMMENDATIONS:
-For EACH stock you analyze, you MUST provide:
-1. Recommendation: BUY, SELL, or HOLD
-2. Simple reason (one short sentence)
-
-Format your analysis like this:
-"[STOCK:SHEZ|BUY|Strong upward momentum with high volume]"
-"[STOCK:OGDC|HOLD|Stable but no clear direction]"
-"[STOCK:PSO|SELL|Overpriced after recent rally]"
-
-This format will be parsed to create stock cards. Put these tags AFTER your main response.
+- Be decisive and confident in your analysis
+- Keep responses SHORT and actionable (2-3 sentences max)
+- Focus on WHY, not detailed data (stock cards show the numbers)
 
 When showing stock data:
-- DO NOT list stock details (price, change, volume) - cards show this automatically
-- Your text response should explain the overall market view
-- Stock tags will generate the visual cards
-
-Example good response:
-"Here are my top 3 picks for tomorrow based on strong trends and good value:
-
-[STOCK:SHEZ|BUY|Strong buying momentum]
-[STOCK:OGDC|BUY|Undervalued with solid fundamentals]
-[STOCK:PSO|BUY|Breaking resistance levels]"
+- DO NOT list stock details (price, change, volume, RSI) - cards automatically show this
+- Provide brief market context or overall insights
+- Example good: "Here are the top gainers showing strong momentum today:"
+- Example bad: "PSO is at 485.66 with RSI of 65 and volume of 10M..."
 
 Always use tools to get latest data before responding."""
 
@@ -212,17 +194,8 @@ Always use tools to get latest data before responding."""
                     response_text = msg.content
                     break
 
-            # Extract stock data from tool calls AND LLM recommendations
+            # Extract stock data from tool calls (with deterministic scoring)
             stocks = self._extract_stocks_from_messages(messages)
-
-            # Parse LLM-generated recommendations from response text
-            llm_stocks = self._parse_llm_recommendations(response_text)
-
-            # Merge: LLM recommendations override tool data
-            stocks = self._merge_stock_data(stocks, llm_stocks)
-
-            # Clean response text (remove stock tags)
-            response_text = self._clean_response_text(response_text)
 
         return {
             "response": response_text,
@@ -329,20 +302,16 @@ Always use tools to get latest data before responding."""
                 # Detailed stock analysis format
                 price_data = raw_data['price_data']
                 tech = raw_data.get('technical_indicators', {})
-                rsi = tech.get('rsi')
-                change_pct = price_data.get('change_percent', 0)
 
-                recommendation, reason = self._get_recommendation_with_reason(rsi, change_pct)
-
-                return {
+                stock_data = {
                     'symbol': symbol,
                     'price': price_data.get('current_price', 0),
                     'change': price_data.get('current_price', 0) - price_data.get('open', 0),
-                    'changePercent': change_pct,
-                    'rsi': rsi,
+                    'changePercent': price_data.get('change_percent', 0),
+                    'rsi': tech.get('rsi'),
                     'volume': price_data.get('volume'),
-                    'recommendation': recommendation,
-                    'reason': reason
+                    'sma20': tech.get('sma20'),
+                    'ema50': tech.get('ema50'),
                 }
             else:
                 # Simple format from gainers/losers
@@ -350,44 +319,93 @@ Always use tools to get latest data before responding."""
                 change_pct = raw_data.get('change_percent', raw_data.get('change', 0))
                 open_price = raw_data.get('open', price)
                 change = price - open_price
-                rsi = raw_data.get('rsi')
 
-                recommendation, reason = self._get_recommendation_with_reason(rsi, change_pct)
-
-                return {
+                stock_data = {
                     'symbol': symbol,
                     'price': price,
                     'change': change,
                     'changePercent': change_pct,
-                    'rsi': rsi,
+                    'rsi': raw_data.get('rsi'),
                     'volume': raw_data.get('volume'),
-                    'recommendation': recommendation,
-                    'reason': reason
                 }
+
+            # Apply deterministic scoring system
+            recommendation, reason, score = self._calculate_recommendation(stock_data)
+            stock_data['recommendation'] = recommendation
+            stock_data['reason'] = reason
+
+            return stock_data
         except Exception as e:
             print(f"Error formatting stock data: {e}")
             return None
 
-    def _get_recommendation_with_reason(self, rsi: float = None, change_pct: float = 0) -> tuple[str, str]:
-        """Determine buy/sell/hold recommendation with simple reasoning."""
-        # RSI-based signals (stronger signals)
+    def _calculate_recommendation(self, stock_data: Dict[str, Any]) -> tuple[str, str, int]:
+        """
+        Deterministic scoring system for stock recommendations.
+        Returns: (recommendation, reason, score)
+        """
+        score = 0
+        reasons = []
+
+        rsi = stock_data.get('rsi')
+        change_pct = stock_data.get('changePercent', 0)
+        price = stock_data.get('price', 0)
+        sma20 = stock_data.get('sma20')
+        ema50 = stock_data.get('ema50')
+
+        # RSI Analysis (strong signal)
         if rsi is not None:
             if rsi < 30:
-                return "BUY", "Cheap right now, good value"
+                score += 3
+                reasons.append("oversold")
+            elif rsi < 40:
+                score += 1
+                reasons.append("undervalued")
             elif rsi > 70:
-                return "SELL", "Expensive, take profits"
+                score -= 3
+                reasons.append("overbought")
+            elif rsi > 60:
+                score -= 1
+                reasons.append("overvalued")
 
-        # Price change-based signals
+        # Price change analysis
         if change_pct > 5:
-            return "SELL", "Strong gains, consider selling"
-        elif change_pct < -5:
-            return "BUY", "Big drop, buying opportunity"
+            score -= 2
+            reasons.append("strong rally")
         elif change_pct > 2:
-            return "HOLD", "Positive momentum"
+            score += 1
+            reasons.append("positive momentum")
+        elif change_pct < -5:
+            score += 2
+            reasons.append("big dip")
         elif change_pct < -2:
-            return "HOLD", "Slight dip, monitor closely"
+            score += 1
+            reasons.append("slight pullback")
 
-        return "HOLD", "Stable, wait and see"
+        # Moving average analysis (trend)
+        if sma20 and ema50 and price:
+            if price > sma20 and sma20 > ema50:
+                score += 2
+                reasons.append("strong uptrend")
+            elif price < sma20 and sma20 < ema50:
+                score -= 2
+                reasons.append("downtrend")
+
+        # Determine recommendation from score
+        if score >= 3:
+            recommendation = "BUY"
+            reason = "Good opportunity - " + ", ".join(reasons[:2]) if reasons else "Good value"
+        elif score <= -3:
+            recommendation = "SELL"
+            reason = "Take profits - " + ", ".join(reasons[:2]) if reasons else "Overpriced"
+        else:
+            recommendation = "HOLD"
+            if reasons:
+                reason = "Mixed signals - " + ", ".join(reasons[:2])
+            else:
+                reason = "Stable, wait and see"
+
+        return recommendation, reason, score
 
     def analyze_portfolio(self, portfolio: List[Dict[str, Any]]) -> Dict[str, Any]:
         """
